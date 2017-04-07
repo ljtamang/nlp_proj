@@ -42,6 +42,7 @@ def chi_sq_features_test(data_frame, no_of_features):
 
     return selected_features, is_selected
 
+
 pcoef_scorer = make_scorer(pcorrcoef, greater_is_better=True)
 
 
@@ -50,13 +51,13 @@ def main():
     # Define size of cross validation
     kfold = 10  # kfold size
 
-    # Path of data set 01
-    output_path = root_dir_path() + "/result/a.csv"
+    # Path of output result
+    output_path = root_dir_path() + "/result/avg_GBR_only_result.csv"
 
     # Path of data set 01
     dataset_01_path = root_dir_path() + "/data/selected-features-file-sts-2017-training.csv"
 
-    # Form data set 02
+    # Form data set 02 from data set 1
     # Convert gold value(continuous value) to  discrete value and negative values to zero.
     dataset_02_path = root_dir_path() + "/data/dataset_02.csv"
     gold_to_discrete(dataset_01_path, dataset_02_path)
@@ -65,22 +66,23 @@ def main():
     dataset_01 =  pd.read_csv(dataset_01_path)
     dataset_02 = pd.read_csv(dataset_02_path)
 
-    # Best Features Selection
-    # Each CMi and RMi model will be evaluated using 10 - fold cross validation.
-    # The feature set Fi will be selected as best feature if average accuracy of CMi and RMI is best.
-    outputs = dict()
-    best_avg_accuracy = 0.0
+    # Best Features Selection Algorithm
+    # 1) Build Gradient Boosting Regression Model (GBRi) for different number of i
+    # 2) Select best Fi features using chi-squared test for i <= (No of All available features)
+    # 3) Build GBRMi model and evaluate using 10 fold cross validation.
+    # 4) The Feature set Fi with best pearson correlation coefficient will be reported as best feature
 
-    values = []  # collection of row values
-
+    best_avg_GBRMi_score = 0.0  # best model accuracy
+    best_Fi = []  # Best features
+    values = []  # collection of outputs of each model
     # for i in range(1,len(dataset_01.columns)):
     for i in range(1, 3):
 
-        # find best i number of features
+        # Select best Fi features using chi-squared test
         Fi = chi_sq_features_test(dataset_02,i)[0]  # selected features
         is_selected = chi_sq_features_test(dataset_02, i)[1]  # True if selected, else false
 
-        # build Gradient Boosting Regression Model, RMi
+        # Build Gradient Boosting Regression Model, GBRMi
         params = {'n_estimators': 1000, 'max_depth': 3, 'min_samples_split': 2, 'learning_rate': 0.01, 'loss': 'ls'}
         clf = ensemble.GradientBoostingRegressor(**params)
         GBRMi = ensemble.GradientBoostingRegressor(**params)
@@ -88,12 +90,11 @@ def main():
         # build Support Vector Classification model, CMi
         # CMi = svm.SVC(kernel='linear')
 
-        # Evaluate GBR model
+        # Evaluate GBRMi model
         data = dataset_01[Fi].values[:, :]
         target = dataset_01.values[:, (dataset_01.values.shape[1] - 1)]
-        scores = cross_val_score(GBRMi, data, target, cv=kfold, scoring=pcoef_scorer)
-        folds_avg_accuracy_r = np.mean(scores)
-        # print(folds_avg_accuracy_r)
+        GBRMi_scores = cross_val_score(GBRMi, data, target, cv=kfold, scoring=pcoef_scorer)
+        avg_GBRMi_score = np.mean(GBRMi_scores)
 
         '''
         # Evaluate classification model
@@ -105,15 +106,14 @@ def main():
         folds_avg_accuracy = np.mean([folds_avg_accuracy_r,folds_avg_accuracy_c ])
         '''
 
-        # update best accuracy and features
-        if folds_avg_accuracy_r> best_avg_accuracy:
-            best_avg_accuracy = folds_avg_accuracy_r
-            best_feature = Fi
+        # Update  Best scores and Features
+        if avg_GBRMi_score> best_avg_GBRMi_score:
+            best_avg_GBRMi_score = avg_GBRMi_score
+            best_Fi = Fi
 
-        # store row values
-        row_value = [i, folds_avg_accuracy_r]
-        row_value.extend(map(lambda x: 1 if x else 0, is_selected)) # uncomment if you want to add 0 and 1
-        # row_value.extend(is_selected)
+        # Store row values (output when selecting i number of features)
+        row_value = [i, avg_GBRMi_score]
+        row_value.extend(map(lambda x: 1 if x else 0, is_selected))
         values.append(row_value)
         print(row_value)
         print(len(row_value))
