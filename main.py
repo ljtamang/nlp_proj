@@ -122,6 +122,13 @@ def main():
     col_names.extend(dataset_01.columns[:-1]) # exclude last gold column
     df = pd.DataFrame(data=values, index=None, columns=col_names)
     df.to_csv(path_or_buf=output_path, index=None)
+    summary_data = np.array([["Best Average Score : "+str(best_avg_GBRMi_score)],
+                             ["Best Number of Features : "+str(len(best_Fi))],
+                             ["Selected Features: "+", ".join(best_Fi)]])
+    df2 = pd.DataFrame(data=summary_data, index=None, columns=None)
+    with open(output_path, 'a') as f:
+        df2.to_csv(f, header=False, index=None)
+    print(", ".join(best_Fi))
 
 
 main()
