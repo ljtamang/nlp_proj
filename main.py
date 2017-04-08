@@ -14,16 +14,25 @@ from decimal import Decimal
 
 
 def root_dir_path():
+    """
+        Returns current directory path.
+    """
     dir = os.path.dirname(__file__)
     return dir
 
 
 def pcorrcoef(ground_truth, predictions):  # pearson correlation coefficient
+    """
+        Calculate  and returns pearson coefficient.
+    """
     corr = np.corrcoef(ground_truth, predictions)
     return corr[0, 1]
 
 
 def gold_to_discrete(source_path, desitnation_path):
+    """
+       Convert last gold column to discrete from continious, makes any negative value 0 and write to new csv file. 
+    """
     df = pd.read_csv(source_path)
     df['Gold'] = df['Gold'].round()
     df[df < 0] = 0
@@ -31,6 +40,9 @@ def gold_to_discrete(source_path, desitnation_path):
 
 
 def chi_sq_features_test(data_frame, no_of_features):
+    """
+        Perform chi-squared test and returns best number features set. 
+    """
     array = data_frame.values  # values of data frame
     columns = data_frame.columns  # columns of data frame
     X = array[:, 0:(array.shape[1] - 1)]
@@ -43,92 +55,139 @@ def chi_sq_features_test(data_frame, no_of_features):
     return selected_features, is_selected
 
 
-pcoef_scorer = make_scorer(pcorrcoef, greater_is_better=True)
+def evaluate_model(model, data, target, cv=3):
+    """
+        Evaluate model using 10 cross fold validation and returns average score of 10 fold.
+    """
+    scores = cross_val_score(model, data, target, cv=cv, scoring=pcoef_scorer)
+    avg_cv_score = np.mean(scores)
+
+    return avg_cv_score
 
 
-def main():
+def build_GBR_model():
+    """
+       Build Gradient Boosting Model
+    """
+    params = {'n_estimators': 1000, 'max_depth': 3, 'min_samples_split': 2, 'learning_rate': 0.01, 'loss': 'ls'}
+    clf = ensemble.GradientBoostingRegressor(**params)
+    model = ensemble.GradientBoostingRegressor(**params)
+
+    return model
+
+
+def initialize_result():
+    """
+        initialize result
+    """
+    result = {
+        "col_names": [],  # name of features used
+        "rows": [],  # If feature is selected, 1, else 0
+        "best_features_by_GBR": [],  # best average GBR model accuracy
+        "best_avg_GBR_score": 0.0,  # best average GBR model accuracy
+        "test_score": 0.0,  # best model average GBR and SVC model accuracy
+    }
+    return result
+
+
+def feature_selection(dataset_01, dataset_02):
+    """
+        Perform experiment with different set of features reported by chi-squared test and report result.
+    """
 
     # Define size of cross validation
     kfold = 10  # kfold size
 
-    # Path of output result
-    output_path = root_dir_path() + "/result/avg_GBR_only_result.csv"
+    # initialize features
+    result = initialize_result()
 
-    # Path of data set 01
-    dataset_01_path = root_dir_path() + "/data/selected-features-file-sts-2017-training.csv"
+    # for i in range(1, 3):
+    for i in range(1,len(dataset_01.columns)):
 
-    # Form data set 02 from data set 1
-    # Convert gold value(continuous value) to  discrete value and negative values to zero.
-    dataset_02_path = root_dir_path() + "/data/dataset_02.csv"
-    gold_to_discrete(dataset_01_path, dataset_02_path)
+        # Select best features using chi-squared test
+        best_features = chi_sq_features_test(dataset_02, i)[0]  # selected features
+        is_feature_selected = chi_sq_features_test(dataset_02, i)[1]  # True if selected, else false
 
-    # load dataset 01 and dataset 02
-    dataset_01 =  pd.read_csv(dataset_01_path)
-    dataset_02 = pd.read_csv(dataset_02_path)
+        # Build Gradient Boosting Regression Model
+        model = build_GBR_model()
 
-    # Best Features Selection Algorithm
-    # 1) Build Gradient Boosting Regression Model (GBRi) for different number of i
-    # 2) Select best Fi features using chi-squared test for i <= (No of All available features)
-    # 3) Build GBRMi model and evaluate using 10 fold cross validation.
-    # 4) The Feature set Fi with best pearson correlation coefficient will be reported as best feature
-
-    best_avg_GBRMi_score = 0.0  # best model accuracy
-    best_Fi = []  # Best features
-    values = []  # collection of outputs of each model
-    # for i in range(1,len(dataset_01.columns)):
-    for i in range(1, 3):
-
-        # Select best Fi features using chi-squared test
-        Fi = chi_sq_features_test(dataset_02,i)[0]  # selected features
-        is_selected = chi_sq_features_test(dataset_02, i)[1]  # True if selected, else false
-
-        # Build Gradient Boosting Regression Model, GBRMi
-        params = {'n_estimators': 1000, 'max_depth': 3, 'min_samples_split': 2, 'learning_rate': 0.01, 'loss': 'ls'}
-        clf = ensemble.GradientBoostingRegressor(**params)
-        GBRMi = ensemble.GradientBoostingRegressor(**params)
-
-        # build Support Vector Classification model, CMi
-        # CMi = svm.SVC(kernel='linear')
-
-        # Evaluate GBRMi model
-        data = dataset_01[Fi].values[:, :]
+        # Evaluate GBR model
+        data = dataset_01[best_features].values[:, :]
         target = dataset_01.values[:, (dataset_01.values.shape[1] - 1)]
-        GBRMi_scores = cross_val_score(GBRMi, data, target, cv=kfold, scoring=pcoef_scorer)
-        avg_GBRMi_score = np.mean(GBRMi_scores)
+        avg_GBR_score = evaluate_model(model, data, target, cv=kfold)
 
-        '''
-        # Evaluate classification model
-        target = dataset_02.values[:, (dataset_02.values.shape[1] - 1)]  # gold values
-        scores = cross_val_score(CMi, data, target, cv=kfold, scoring=pcoef_scorer)
-        folds_avg_accuracy_c = np.mean(scores)
-
-        # Average accuracy of regression and classification
-        folds_avg_accuracy = np.mean([folds_avg_accuracy_r,folds_avg_accuracy_c ])
-        '''
-
-        # Update  Best scores and Features
-        if avg_GBRMi_score> best_avg_GBRMi_score:
-            best_avg_GBRMi_score = avg_GBRMi_score
-            best_Fi = Fi
+        # Update  Best scores and Features using GBR model accuracy only
+        if avg_GBR_score > result["best_avg_GBR_score"]:
+            result["best_avg_GBR_score"] = avg_GBR_score
+            result["best_features_by_GBR"] = best_features
 
         # Store row values (output when selecting i number of features)
-        row_value = [i, avg_GBRMi_score]
-        row_value.extend(map(lambda x: 1 if x else 0, is_selected))
-        values.append(row_value)
-        print(row_value)
-        print(len(row_value))
+        row_value = [i, avg_GBR_score] # add number of features and avg_GBR_score
+        row_value.extend(map(lambda x: 1 if x else 0, is_feature_selected))
+        result["rows"].append(row_value)
 
-    col_names = ["no_features_selected", str(kfold)+"_fold_avg_accuracy"]
-    col_names.extend(dataset_01.columns[:-1]) # exclude last gold column
-    df = pd.DataFrame(data=values, index=None, columns=col_names)
+    col_names = ["no_features_selected", str(kfold) + "_avg_GBR_score"]
+    col_names.extend(dataset_01.columns[:-1])  # exclude last gold column
+    result["col_names"] = col_names
+
+    return result
+
+
+def write_result(output_path, result):
+    """
+         Writes result to csv file
+     """
+
+    df = pd.DataFrame(data=result["rows"], index=None, columns=result["col_names"])
     df.to_csv(path_or_buf=output_path, index=None)
-    summary_data = np.array([["Best Average Score : "+str(best_avg_GBRMi_score)],
-                             ["Best Number of Features : "+str(len(best_Fi))],
-                             ["Selected Features: "+", ".join(best_Fi)]])
+
+    summary_data = np.array([["Selected Features: " + ", ".join(result["best_features_by_GBR"])],
+                             ["Number of Features : " + str(len(result["best_features_by_GBR"]))],
+                             ["model accuracy : " + str(result["best_avg_GBR_score"])],
+                             ["test accuracy : " + str(result["test_score"])]
+                            ])
     df2 = pd.DataFrame(data=summary_data, index=None, columns=None)
     with open(output_path, 'a') as f:
         df2.to_csv(f, header=False, index=None)
-    print(", ".join(best_Fi))
+
+# pearson coefficient score function
+pcoef_scorer = make_scorer(pcorrcoef, greater_is_better=True)
 
 
+def main():
+    """
+     Main function of  the program
+    """
+
+    # Define path for data
+    dataset_01_path = root_dir_path() + "/data/dataset_01.csv"  # data set 1
+    output_path = root_dir_path() + "/result/output.csv"  # ouput data
+    test_data_path = root_dir_path() + "/data/test_dataset.csv"  # test data set
+
+    # Form data set 02 from data set 1
+    # Convert gold value(continuous value) to  discrete value and negative values to zero.
+    dataset_02_path = root_dir_path() + "/data/dataset_02.csv"  # data set 2
+    gold_to_discrete(dataset_01_path, dataset_02_path)
+
+    # load data set 01, data set 02 and test data
+    data_set_01 = pd.read_csv(dataset_01_path)
+    data_set_02 = pd.read_csv(dataset_02_path)
+    test_data = pd.read_csv(test_data_path)
+
+    # Perform feature selection
+    result = feature_selection(data_set_01, data_set_02)
+
+    # Evaluate model using test data
+    data = test_data[result["best_features_by_GBR"]].values[:, :]
+    target = test_data.values[:, (test_data.values.shape[1] - 1)]
+    model = build_GBR_model()
+    result["test_score"] = evaluate_model(model, data, target, cv=10)
+
+    # write result
+    write_result(output_path, result)
+
+    print("Successfully executed.")
+
+
+# invoke the main function
 main()
